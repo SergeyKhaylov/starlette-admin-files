@@ -9,8 +9,9 @@ from typing import Any
 
 import pytest
 from obstore.store import MemoryStore
+from sqlalchemy import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from starlette_admin_files import FileAttribute, ImageAttribute, ObjectStorage, file_column
+from starlette_admin_files import FileAttribute, ImageAttribute, ObjectStorage
 
 from conftest import upload
 
@@ -60,7 +61,7 @@ async def test_plain_files_work_without_pillow(without_pillow: None) -> None:
         __tablename__ = "doc_without_pillow"
 
         id: Mapped[int] = mapped_column(primary_key=True)
-        _file: Mapped[dict | None] = file_column("file")
+        _file: Mapped[dict | None] = mapped_column("file", JSON)
         file = FileAttribute("_file", storage=storage, upload_folder="docs")
 
     doc = Doc()

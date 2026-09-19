@@ -54,23 +54,22 @@ downloads = ObjectStorage(name="downloads", store=MemoryStore(), disposition="at
 
 # --- columns ------------------------------------------------------------
 
-# The column is plain JSON unless you say otherwise. On PostgreSQL, JSONB is
-# usually the better choice: it is indexable and queryable with expressions
-# such as `Post._cover["key"].astext`.
+# The column is plain SQLAlchemy. `none_as_null=True` keeps a cleared column at
+# SQL NULL instead of a JSON `null`, which is what `is_(None)` matches:
 #
-#     _cover: Mapped[dict | None] = file_column("cover")          # JSON
-#     _cover: Mapped[dict | None] = file_column("cover", JSONB)   # PostgreSQL only
+#     _cover: Mapped[dict | None] = mapped_column("cover", JSON(none_as_null=True))
+#
+# On PostgreSQL, JSONB is usually the better choice: it is indexable and
+# queryable with expressions such as `Post._cover["key"].astext`.
+#
+#     _cover: Mapped[dict | None] = mapped_column("cover", JSONB(none_as_null=True))
 #
 # A bare JSONB does not compile on SQLite or MySQL, so use a variant when the
 # same models also run there (in tests, typically):
 #
-#     _cover: Mapped[dict | None] = file_column(
+#     _cover: Mapped[dict | None] = mapped_column(
 #         "cover", JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
 #     )
-#
-# `file_column` is only a shortcut; this is exactly the same:
-#
-#     _cover: Mapped[dict | None] = mapped_column("cover", FileJSON(), nullable=True)
 
 
 class FakeRequest:

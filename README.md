@@ -15,7 +15,7 @@ class Post(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
-    _cover: Mapped[dict | None] = file_column("cover")
+    _cover: Mapped[dict | None] = mapped_column("cover", JSON(none_as_null=True))
     cover = ImageAttribute(
         "_cover", storage=storage, upload_folder="covers", thumbnail_size=(200, 200)
     )
@@ -45,11 +45,12 @@ while the model is being declared, with a message saying what to install.
 
 ```python
 from obstore.store import S3Store
+from sqlalchemy import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from starlette_admin import ImageField
 from starlette_admin.contrib.sqla import Admin, ModelView
 
-from starlette_admin_files import ImageAttribute, ObjectStorage, file_column
+from starlette_admin_files import ImageAttribute, ObjectStorage
 
 storage = ObjectStorage(name="media", store=S3Store("my-bucket"), prefix="media")
 
@@ -66,7 +67,7 @@ class Product(Base):
 
     # Two lines per file: the column that stores the metadata, and the
     # attribute that turns it into an Image and writes it back.
-    _photo: Mapped[dict | None] = file_column("photo")
+    _photo: Mapped[dict | None] = mapped_column("photo", JSON(none_as_null=True))
     photo = ImageAttribute("_photo", storage=storage, upload_folder="photos")
 
 
@@ -89,7 +90,7 @@ documents, list columns, cleanup, and storage configuration.
 | Piece | Role |
 | --- | --- |
 | `ObjectStorage` | A starlette-admin storage backend over any obstore store. |
-| `file_column()` / `FileJSON` | The JSON column holding the metadata dict. |
+| A `JSON` column | Holds the metadata dict. Plain SQLAlchemy — see [Columns](#columns). |
 | `FileAttribute` / `ImageAttribute` | The model attribute: parameters, reads, and every write. |
 | `FileListAttribute` / `ImageListAttribute` | The same for a list of files. |
 | `File` / `Image` | Read-only values: metadata plus `read()`, `url()`, `delete()`. |
@@ -221,21 +222,43 @@ loaded attributes. Use `expire_on_commit=False`, or capture the previous file yo
 
 ## Columns
 
-`file_column()` is a shortcut, not a requirement — this is exactly equivalent:
+The column is plain SQLAlchemy; the package does not wrap it in a type of its own:
 
 ```python
-_cover: Mapped[dict | None] = mapped_column("cover", FileJSON(), nullable=True)
+from sqlalchemy import JSON
+
+_cover: Mapped[dict | None] = mapped_column("cover", JSON(none_as_null=True))
+_shots: Mapped[list | None] = mapped_column("shots", JSON(none_as_null=True))
 ```
 
-It exists so the safe defaults are also the short ones: write validation, and `none_as_null=True`
-without which `None` is stored as a JSON null and `where(col.is_(None))` stops matching.
+**`none_as_null=True` is the recommended default.** A row that never had a file holds SQL NULL,
+but clearing one — `delete()`, `replace()` with nothing, dropping the last item of a list — writes
+Python `None`, and SQLAlchemy stores that as a JSON `null` unless the type says otherwise. Both
+read back as `None`, so application code sees no difference; SQL does:
+
+```python
+await post.cover.delete()  # the column now holds 'null', not NULL
+
+select(Post).where(Post._cover.is_(None))  # ...so this row is missing from the result
+```
+
+With `none_as_null=True` an emptied column returns to exactly the state it had before the first
+upload, and "no file" has one representation instead of two. Without it the two are yours to keep
+apart in every query — which is a legitimate choice, just one to make deliberately: a JSON `null`
+also passes a `NOT NULL` constraint and is counted by `count(col)`.
+
+Nothing else is needed — `Mapped[dict | None]` already makes the column nullable, and every write
+goes through the attribute, which refuses anything that is not a file dict (`filename`,
+`content_type`, `size`, `storage`, and a non-empty `key`).
 
 The JSON type underneath is yours to pick:
 
 ```python
-file_column("cover")  # JSON on every dialect
-file_column("cover", JSONB)  # PostgreSQL: indexable, queryable
-file_column("cover", JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql"))
+JSON(none_as_null=True)   # JSON on every dialect
+JSONB(none_as_null=True)  # PostgreSQL: indexable, queryable
+
+# Both, from the same model:
+JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
 ```
 
 A bare `JSONB` does not compile on SQLite or MySQL, so reach for the variant when the same models
@@ -245,7 +268,7 @@ also run there — in tests, typically.
 
 ```sh
 uv sync
-uv run pytest            # 129 tests
+uv run pytest            # 124 tests
 uv run ruff check .
 uv run ruff format .
 uv run pyright

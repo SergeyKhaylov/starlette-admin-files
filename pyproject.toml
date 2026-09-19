@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "starlette-admin-files"
-version = "0.1.0"
+version = "0.1.1"
 description = "File and image columns for starlette-admin, stored through obstore"
 readme = "README.md"
 license = "MIT"

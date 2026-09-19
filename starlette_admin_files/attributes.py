@@ -6,7 +6,7 @@ the parameters (storage, folder, limits), hands them to the admin field through
 explicit `save()`, `replace()` or `delete()`.
 
     class Post(Base):
-        _cover: Mapped[dict | None] = file_column("cover")
+        _cover: Mapped[dict | None] = mapped_column("cover", JSON)
         cover = ImageAttribute("_cover", storage=storage, upload_folder="covers",
                                thumbnail_size=(200, 200))
 
@@ -225,7 +225,8 @@ class BoundBase:
     def _raw(self) -> Any:
         return getattr(self.obj, self.attribute.column)
 
-    def _write(self, value: Any) -> None:
+    @staticmethod
+    def _checked(value: Any) -> dict[str, Any]:
         if isinstance(value, (File, FileInfo)):
             value = value.to_dict()
         if not isinstance(value, dict):
@@ -236,7 +237,17 @@ class BoundBase:
             raise ValueError(f"file value is missing keys: {sorted(missing)}")
         if not value["key"]:
             raise ValueError("file value has an empty key: was the file saved?")
-        setattr(self.obj, self.attribute.column, dict(value))
+        return dict(value)
+
+    def _write(self, value: Any) -> None:
+        """Write a validated value into the column; `None` clears it."""
+        if value is None:
+            written = None
+        elif isinstance(value, (list, tuple)):
+            written = [self._checked(item) for item in value]
+        else:
+            written = self._checked(value)
+        setattr(self.obj, self.attribute.column, written)
 
     def _remember_upload(self, data: dict[str, Any]) -> None:
         """Record the upload on the session so a rollback can clean it up."""

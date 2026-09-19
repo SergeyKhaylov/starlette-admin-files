@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette_admin import FileField, ImageField
 from starlette_admin_files import File, Image, ObjectStorage
@@ -239,6 +240,39 @@ async def test_list_column_survives_a_round_trip(
 
     assert [shot.filename for shot in reloaded.shots] == ["one.png", "two.png"]
     assert all(isinstance(shot, Image) for shot in reloaded.shots)
+
+
+# --- the column ---------------------------------------------------------
+
+
+async def test_a_cleared_column_is_sql_null(session: AsyncSession, model: type[Any]) -> None:
+    """`delete()` writes `None`; with `none_as_null=False` that would reach the
+    database as a JSON `null`, and `is_(None)` would stop matching the row.
+    """
+    untouched = model()
+    cleared = model()
+    session.add_all([untouched, cleared])
+    await cleared.attachment.save(b"x", "a.txt", "text/plain")
+    await cleared.attachment.delete()
+    await session.commit()
+
+    found = (await session.scalars(select(model.id).where(model._attachment.is_(None)))).all()
+
+    assert sorted(found) == sorted([untouched.id, cleared.id])
+
+
+async def test_an_emptied_list_column_is_sql_null(session: AsyncSession, model: type[Any]) -> None:
+    post = model()
+    session.add(post)
+    await post.shots.save([upload(filename="one.png"), upload(filename="two.png")])
+    await post.shots.delete()
+    await session.commit()
+
+    stored = await session.scalar(
+        text("select typeof(shots) from post where id = :id"), {"id": post.id}
+    )
+
+    assert stored == "null"  # SQLite for SQL NULL; a JSON null would be 'text'
 
 
 def test_image_attributes_expose_their_parameters(storage: ObjectStorage) -> None:

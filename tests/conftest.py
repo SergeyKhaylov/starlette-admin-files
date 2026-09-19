@@ -11,6 +11,7 @@ from typing import Any, cast
 import pytest
 from obstore.store import MemoryStore
 from PIL import Image as PILImage
+from sqlalchemy import JSON
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from starlette.datastructures import Headers, UploadFile
@@ -24,7 +25,6 @@ from starlette_admin_files import (
     ImageListAttribute,
     ObjectStorage,
     allow_unicode_filenames,
-    file_column,
     set_transliterator,
 )
 
@@ -77,9 +77,11 @@ def model(storage: ObjectStorage) -> type[Any]:
         id: Mapped[int] = mapped_column(primary_key=True)
         title: Mapped[str] = mapped_column(default="")
 
-        _attachment: Mapped[dict | None] = file_column("attachment")
-        _cover: Mapped[dict | None] = file_column("cover")
-        _shots: Mapped[list | None] = file_column("shots")
+        # `none_as_null=True` is what the README recommends: a cleared column
+        # goes back to SQL NULL instead of holding a JSON `null`.
+        _attachment: Mapped[dict | None] = mapped_column("attachment", JSON(none_as_null=True))
+        _cover: Mapped[dict | None] = mapped_column("cover", JSON(none_as_null=True))
+        _shots: Mapped[list | None] = mapped_column("shots", JSON(none_as_null=True))
 
         attachment = FileAttribute(
             "_attachment",
