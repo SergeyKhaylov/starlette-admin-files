@@ -63,6 +63,7 @@ logger = logging.getLogger(__name__)
 UPLOADED_KEY = "starlette_admin_files.uploaded"
 _REQUIRED_KEYS = frozenset({"filename", "content_type", "size", "storage", "key"})
 
+
 class _ValidationField:
     """A stand-in for a field: upstream validators only read `name`."""
 
