@@ -82,6 +82,9 @@ target-version = "py312"
 line-length = 100
 src = ["starlette_admin_files", "tests"]
 
+[tool.ruff.format]
+exclude = ["README.md"]
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "S", "UP", "B", "ASYNC", "T20"]
 
