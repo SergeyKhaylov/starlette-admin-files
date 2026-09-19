@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Once a week, so upstream breakage shows up here and not in someone's app.
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The corners that actually break: the oldest supported Python with
+          # the lowest dependencies it allows, and the newest with the latest.
+          - python: "3.12"
+            resolution: lowest-direct
+          - python: "3.12"
+            resolution: highest
+          - python: "3.13"
+            resolution: highest
+          - python: "3.14"
+            resolution: lowest-direct
+          - python: "3.14"
+            resolution: highest
+    name: py${{ matrix.python }} / ${{ matrix.resolution }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Test
+        run: >
+          uv run
+          --python ${{ matrix.python }}
+          --resolution ${{ matrix.resolution }}
+          --extra image
+          pytest -q
+
+  latest-upstream:
+    # Ignores the lockfile entirely: catches a new starlette-admin or obstore
+    # release before it reaches users. Allowed to fail the schedule, not a PR.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv lock --upgrade
+      - run: uv run --extra image pytest -q
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run --with pyright --extra image pyright
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - run: uv run --with twine twine check dist/*

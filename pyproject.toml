@@ -1,0 +1,105 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "starlette-admin-files"
+version = "0.1.0"
+description = "File and image columns for starlette-admin, stored through obstore"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Web Environment",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database",
+    "Topic :: Internet :: WWW/HTTP",
+    "Typing :: Typed",
+]
+dependencies = [
+    "anyascii>=0.3",
+    # obstore is pre-1.0: minor releases may break the API it exposes.
+    "obstore>=0.9,<1",
+    # 2.0.36 is the oldest release this package is tested against; older ones
+    # install on 3.14 but crash at import, so the floor is raised there.
+    "sqlalchemy>=2.0.36,<3; python_version < '3.14'",
+    "sqlalchemy>=2.0.53,<3; python_version >= '3.14'",
+    "starlette>=0.40",
+    # The storage-backed FileField this package builds on arrived in 1.0, and
+    # some of the integration points it uses are not public API.
+    "starlette-admin>=1.0,<2",
+]
+
+[project.urls]
+Homepage = "https://github.com/SergeyKhaylov/starlette-admin-files"
+Repository = "https://github.com/SergeyKhaylov/starlette-admin-files"
+Issues = "https://github.com/SergeyKhaylov/starlette-admin-files/issues"
+
+[project.optional-dependencies]
+image = [
+    # Older Pillow has no wheels for 3.14.
+    "pillow>=10.4; python_version < '3.14'",
+    "pillow>=12.3; python_version >= '3.14'",
+]
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.22.1",
+    "fastapi>=0.141.1",
+    "greenlet>=3.5.6",
+    # No floor here: it would shadow the one declared by the image extra and
+    # the lowest-direct CI job would stop exercising it.
+    "pillow",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.4",
+    "uvicorn>=0.53.0",
+]
+
+[tool.uv]
+package = true
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+exclude = [".venv", "build", "dist", "**/__pycache__"]
+typeCheckingMode = "standard"
+pythonVersion = "3.12"  # type-check against the oldest supported
+reportMissingImports = "error"
+reportMissingTypeStubs = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["starlette_admin_files", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "S", "UP", "B", "ASYNC", "T20"]
+
+[tool.ruff.lint.per-file-ignores]
+# Examples print what they demonstrate; tests assert.
+"examples/*" = ["T20"]
+"tests/*" = ["S101"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["starlette_admin_files"]
+concurrency = ["thread", "greenlet"]
+
+[tool.setuptools]
+packages = ["starlette_admin_files"]
+
+[tool.setuptools.package-data]
+starlette_admin_files = ["py.typed"]
