@@ -37,7 +37,8 @@ from collections.abc import Iterator, Sequence
 from dataclasses import replace as dc_replace
 from typing import TYPE_CHECKING, Any, Self, cast, overload
 
-from sqlalchemy import JSON
+from sqlalchemy import JSON, inspection
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.orm.attributes import QueryableAttribute
 from sqlalchemy.sql.operators import ColumnOperators
@@ -171,6 +172,19 @@ class _ColumnExpression(ColumnOperators):
 
     def __repr__(self) -> str:
         return f"{self.file_column!r} -> {self._target}"
+
+
+@inspection._inspects(_ColumnExpression)
+def _inspect_column_expression(target: _ColumnExpression) -> Any:
+    """Let `inspect()` see the mapped attribute behind the handle.
+
+    The loader options — `load_only`, `defer`, `undefer` — inspect their
+    argument instead of calling `__clause_element__`, and refuse outright
+    anything `inspect()` does not recognise. Later 2.0.x releases coerce
+    first and hide the gap; 2.0.36, the oldest release this package
+    supports, raises `ArgumentError`.
+    """
+    return sa_inspect(target.__clause_element__())
 
 
 if TYPE_CHECKING:

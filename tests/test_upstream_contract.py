@@ -37,6 +37,20 @@ def test_secure_filename_reads_the_global_at_call_time() -> None:
     assert secure_filename("отчёт.pdf") == "pdf"
 
 
+def test_the_inspection_registry_still_takes_a_custom_type() -> None:
+    """`columns` registers its expression handle through this private hook.
+
+    Without it `load_only(Post.cover)` raises `ArgumentError` on the oldest
+    SQLAlchemy this package supports: the loader options inspect their
+    argument rather than calling `__clause_element__`.
+    """
+    from sqlalchemy import inspection
+    from starlette_admin_files.columns import _ColumnExpression
+
+    assert callable(getattr(inspection, "_inspects", None))
+    assert _ColumnExpression in inspection._registrars
+
+
 def test_validators_keep_their_call_shape() -> None:
     """They are called with a stand-in field and no request."""
     for validator in (file_size(10), file_type("image/*")):

@@ -25,7 +25,10 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "anyascii>=0.3",
+    # 0.3.2 reads its data tables through importlib.resources.files();
+    # 0.3.0 and 0.3.1 use read_binary(), deprecated since 3.11, and the
+    # suite turns warnings into errors.
+    "anyascii>=0.3.2",
     # Imported directly by `save_thumbnail` to keep Pillow off the event loop.
     "anyio>=3.6.2",
     # obstore is pre-1.0: minor releases may break the API it exposes.
