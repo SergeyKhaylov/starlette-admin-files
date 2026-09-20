@@ -10,7 +10,13 @@ of work is built from:
     except Exception:
         await delete_files(uploaded_files(session))   # no commit: drop the uploads
         raise
-    await delete_files(orphans)                       # committed: drop the old files
+    else:
+        await delete_files(orphans)                   # committed: drop the old files
+
+`else` is what keeps the two apart. Inside the `try` the second call would be
+covered by the handler, so a failure after the commit would delete the files
+the commit just made live; in a `finally` it would run after a rollback, when
+the rows still reference them.
 
 `orphaned_files` reads previous values from SQLAlchemy's attribute history,
 which is only available for loaded attributes. With `expire_on_commit=True` the
@@ -27,7 +33,7 @@ from typing import Any
 
 from sqlalchemy import inspect as sa_inspect
 
-from .attributes import UPLOADED_KEY, BaseFileAttribute
+from .columns import UPLOADED_KEY, BaseFileColumn
 from .file import File
 
 __all__ = ["delete_files", "orphaned_files", "uploaded_files"]
@@ -40,24 +46,24 @@ def _sync_session(session: Any) -> Any:
     return getattr(session, "sync_session", session)
 
 
-def _file_attributes(model: type) -> list[BaseFileAttribute]:
-    found: dict[str, BaseFileAttribute] = {}
+def _file_columns(model: type) -> list[BaseFileColumn]:
+    found: dict[str, BaseFileColumn] = {}
     for klass in reversed(model.__mro__):
         for name, value in vars(klass).items():
-            if isinstance(value, BaseFileAttribute):
+            if isinstance(value, BaseFileColumn):
                 found[name] = value
     return list(found.values())
 
 
-def _as_files(value: Any, attribute: BaseFileAttribute) -> list[File]:
+def _as_files(value: Any, file_column: BaseFileColumn) -> list[File]:
     if not value:
         return []
     items = value if isinstance(value, list) else [value]
-    return [attribute.file_class(item) for item in items if isinstance(item, dict)]
+    return [file_column.file_class(item) for item in items if isinstance(item, dict)]
 
 
 def uploaded_files(session: Any, *, clear: bool = True) -> list[File]:
-    """Files uploaded through model attributes in this session.
+    """Files uploaded through file columns in this session.
 
     Use them to clean up when a transaction never reaches its commit.
     """
@@ -77,24 +83,24 @@ def orphaned_files(session: Any) -> list[File]:
 
     for obj in sync.dirty:
         state = sa_inspect(obj)
-        for attribute in _file_attributes(type(obj)):
-            attr_state = state.attrs.get(attribute.column)
+        for file_column in _file_columns(type(obj)):
+            attr_state = state.attrs.get(file_column.column)
             if attr_state is None:
                 continue
             history = attr_state.history
             if not history.deleted:
                 continue
-            current = {file.key for file in _as_files(attr_state.value, attribute)}
+            current = {file.key for file in _as_files(attr_state.value, file_column)}
             for old in history.deleted:
                 orphans.extend(
                     file
-                    for file in _as_files(old, attribute)
+                    for file in _as_files(old, file_column)
                     if file.key and file.key not in current
                 )
 
     for obj in sync.deleted:
-        for attribute in _file_attributes(type(obj)):
-            orphans.extend(_as_files(getattr(obj, attribute.column, None), attribute))
+        for file_column in _file_columns(type(obj)):
+            orphans.extend(_as_files(getattr(obj, file_column.column, None), file_column))
 
     return orphans
 

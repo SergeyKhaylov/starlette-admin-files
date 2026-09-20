@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "starlette-admin-files"
-version = "0.1.1"
+version = "0.2.0"
 description = "File and image columns for starlette-admin, stored through obstore"
 readme = "README.md"
 license = "MIT"
@@ -26,6 +26,8 @@ classifiers = [
 ]
 dependencies = [
     "anyascii>=0.3",
+    # Imported directly by `save_thumbnail` to keep Pillow off the event loop.
+    "anyio>=3.6.2",
     # obstore is pre-1.0: minor releases may break the API it exposes.
     "obstore>=0.9,<1",
     # 2.0.36 is the oldest release this package is tested against; older ones
@@ -53,6 +55,8 @@ image = [
 [dependency-groups]
 dev = [
     "aiosqlite>=0.22.1",
+    # Only for the autogenerate test; the package itself never imports it.
+    "alembic>=1.13",
     "fastapi>=0.141.1",
     "greenlet>=3.5.6",
     # No floor here: it would shadow the one declared by the image extra and
@@ -97,6 +101,12 @@ select = ["E", "F", "I", "S", "UP", "B", "ASYNC", "T20"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# The suite is warning-free, so keep it that way: SQLAlchemy and
+# starlette-admin announce a breaking change as a DeprecationWarning a release
+# before it becomes an error, and the `latest-upstream` CI job exists to catch
+# exactly that. A warning worth living with gets `pytest.warns` or an entry
+# here, not a growing backdrop nobody reads.
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 source = ["starlette_admin_files"]

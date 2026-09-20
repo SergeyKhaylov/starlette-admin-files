@@ -108,6 +108,21 @@ async def test_uploaded_files_clears_by_default(session: AsyncSession, model: ty
     assert uploaded_files(session) == []
 
 
+async def test_a_commit_does_not_clear_the_uploads(session: AsyncSession, model: type[Any]) -> None:
+    """Which is why post-commit cleanup belongs in `else` and not in the `try`.
+
+    Under the handler, anything failing after a successful commit would hand
+    `delete_files(uploaded_files(session))` the files that commit just made
+    live.
+    """
+    post = model()
+    session.add(post)
+    saved = await post.attachment.save(b"x", "a.txt", "text/plain")
+    await session.commit()
+
+    assert [file.key for file in uploaded_files(session)] == [saved.key]
+
+
 async def test_delete_files_reports_failures_instead_of_raising(
     storage: ObjectStorage,
 ) -> None:

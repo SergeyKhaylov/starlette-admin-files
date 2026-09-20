@@ -8,10 +8,9 @@ import io
 
 from obstore.store import MemoryStore
 from PIL import Image as PILImage
-from sqlalchemy import JSON
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from starlette_admin_files import ImageListAttribute, ObjectStorage
+from starlette_admin_files import ImageListColumn, ObjectStorage
 
 storage = ObjectStorage(name="media", store=MemoryStore(), prefix="media")
 
@@ -24,10 +23,7 @@ class Gallery(Base):
     __tablename__ = "gallery"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    _shots: Mapped[list | None] = mapped_column("shots", JSON(none_as_null=True))
-    shots = ImageListAttribute(
-        "_shots", storage=storage, upload_folder="shots", thumbnail_size=(100, 100)
-    )
+    shots = ImageListColumn(storage=storage, upload_folder="shots", thumbnail_size=(100, 100))
 
 
 engine = create_async_engine("sqlite+aiosqlite://")
@@ -58,22 +54,20 @@ async def main() -> None:
         )
         print("after save:", [shot.filename for shot in gallery.shots])
 
-        # The bound attribute behaves like a sequence.
+        # The bound column behaves like a sequence.
         print("count:", len(gallery.shots))
         print("first:", gallery.shots[0].filename, gallery.shots[0].thumbnail["key"])
         print("bytes of the first:", len(await gallery.shots[0].read()))
 
-        # Drop by index or by a list of indexes; remove=False keeps the files
-        # in the storage and only detaches them from the row.
+        # Drop by index or by a list of indexes. remove=False would keep the
+        # files in the storage and only detach them from the row.
         dropped = await gallery.shots.delete([0, 2])
         print("dropped:", [shot.filename for shot in dropped])
         print("left:", [shot.filename for shot in gallery.shots])
 
-        # replace() swaps the whole set.
         await gallery.shots.replace(png("black"), "black.png", "image/png")
         print("after replace:", [shot.filename for shot in gallery.shots])
 
-        # delete() with no arguments clears the column.
         await gallery.shots.delete()
         print("after delete():", list(gallery.shots), bool(gallery.shots))
 

@@ -1,12 +1,13 @@
 """File and image columns for starlette-admin, stored through obstore."""
 
-from .attributes import (
-    FileAttribute,
-    FileListAttribute,
-    ImageAttribute,
-    ImageListAttribute,
-)
 from .cleanup import delete_files, orphaned_files, uploaded_files
+from .columns import (
+    ColumnExpression,
+    FileColumn,
+    FileListColumn,
+    ImageColumn,
+    ImageListColumn,
+)
 from .file import File, Image
 from .storage import (
     ObjectStorage,
@@ -16,12 +17,13 @@ from .storage import (
 )
 
 __all__ = [
+    "ColumnExpression",
     "File",
-    "FileAttribute",
-    "FileListAttribute",
+    "FileColumn",
+    "FileListColumn",
     "Image",
-    "ImageAttribute",
-    "ImageListAttribute",
+    "ImageColumn",
+    "ImageListColumn",
     "ObjectStorage",
     "allow_unicode_filenames",
     "ascii_filename",

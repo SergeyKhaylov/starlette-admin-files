@@ -20,9 +20,9 @@ from starlette_admin import FileField, ImageField
 from starlette_admin.contrib.sqla import Admin, ModelView
 from starlette_admin.types import RequestAction
 from starlette_admin_files import (
-    FileAttribute,
-    ImageAttribute,
-    ImageListAttribute,
+    FileColumn,
+    ImageColumn,
+    ImageListColumn,
     ObjectStorage,
     allow_unicode_filenames,
     set_transliterator,
@@ -77,22 +77,18 @@ def model(storage: ObjectStorage) -> type[Any]:
         id: Mapped[int] = mapped_column(primary_key=True)
         title: Mapped[str] = mapped_column(default="")
 
-        # `none_as_null=True` is what the README recommends: a cleared column
-        # goes back to SQL NULL instead of holding a JSON `null`.
-        _attachment: Mapped[dict | None] = mapped_column("attachment", JSON(none_as_null=True))
-        _cover: Mapped[dict | None] = mapped_column("cover", JSON(none_as_null=True))
+        # Two of them declare their own column — "attachment" and "cover",
+        # mapped as `_attachment` and `_cover`. The third attaches to one the
+        # model declares, so the suite exercises both forms.
         _shots: Mapped[list | None] = mapped_column("shots", JSON(none_as_null=True))
 
-        attachment = FileAttribute(
-            "_attachment",
+        attachment = FileColumn(
             storage=storage,
             upload_folder="attachments",
             max_size=1024 * 1024,
         )
-        cover = ImageAttribute(
-            "_cover", storage=storage, upload_folder="covers", thumbnail_size=(100, 100)
-        )
-        shots = ImageListAttribute("_shots", storage=storage, upload_folder="shots")
+        cover = ImageColumn(storage=storage, upload_folder="covers", thumbnail_size=(100, 100))
+        shots = ImageListColumn.existing("_shots", storage=storage, upload_folder="shots")
 
     return Post
 

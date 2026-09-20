@@ -10,11 +10,10 @@ import asyncio
 import io
 
 from obstore.store import MemoryStore
-from sqlalchemy import JSON
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from starlette_admin_files import (
-    FileAttribute,
+    FileColumn,
     ObjectStorage,
     delete_files,
     uploaded_files,
@@ -31,8 +30,7 @@ class Report(Base):
     __tablename__ = "report"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    _document: Mapped[dict | None] = mapped_column("document", JSON(none_as_null=True))
-    document = FileAttribute("_document", storage=storage, upload_folder="reports")
+    document = FileColumn(storage=storage, upload_folder="reports")
 
 
 engine = create_async_engine("sqlite+aiosqlite://")

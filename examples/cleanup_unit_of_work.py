@@ -12,11 +12,11 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from obstore.store import MemoryStore
-from sqlalchemy import JSON, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from starlette_admin_files import (
-    FileAttribute,
+    FileColumn,
     ObjectStorage,
     delete_files,
     orphaned_files,
@@ -34,8 +34,7 @@ class Contract(Base):
     __tablename__ = "contract"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    _scan: Mapped[dict | None] = mapped_column("scan", JSON(none_as_null=True))
-    scan = FileAttribute("_scan", storage=storage, upload_folder="scans")
+    scan = FileColumn(storage=storage, upload_folder="scans")
 
 
 engine = create_async_engine("sqlite+aiosqlite://")
@@ -55,12 +54,13 @@ async def unit_of_work() -> AsyncGenerator[AsyncSession]:
             await session.rollback()
             await delete_files(uploaded_files(session))
             raise
-        # delete_files never stops at the first failure; it returns the pairs
-        # it could not delete, so a bucket without delete permission does not
-        # break the request.
-        failures = await delete_files(orphans)
-        for file, error in failures:
-            print("could not delete", file.key, error)
+        else:
+            # delete_files never stops at the first failure; it returns the
+            # pairs it could not delete, so a bucket without delete permission
+            # does not break the request.
+            failures = await delete_files(orphans)
+            for file, error in failures:
+                print("could not delete", file.key, error)
 
 
 async def exists(key: str) -> bool:

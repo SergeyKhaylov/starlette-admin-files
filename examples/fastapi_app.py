@@ -24,9 +24,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from starlette_admin import FileField, ImageField
 from starlette_admin.contrib.sqla import Admin, ModelView
 from starlette_admin_files import (
-    FileAttribute,
-    ImageAttribute,
-    ImageListAttribute,
+    FileColumn,
+    ImageColumn,
+    ImageListColumn,
     ObjectStorage,
     delete_files,
     orphaned_files,
@@ -47,25 +47,28 @@ class Post(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(default="")
 
-    # The columns hold dicts; their names in the database are
+    # The attach form: the columns are declared here and the file columns are
+    # pointed at them with existing(). Needed when the model cannot let them
+    # declare the column — a reflected __table__, an imperative mapping, or a
+    # column something else maps too. Their names in the database are
     # "attachment" / "cover" / "shots".
     _attachment: Mapped[dict | None] = mapped_column("attachment", JSON(none_as_null=True))
     _cover: Mapped[dict | None] = mapped_column("cover", JSON(none_as_null=True))
     _shots: Mapped[list | None] = mapped_column("shots", JSON(none_as_null=True))
 
-    attachment = FileAttribute(
+    attachment = FileColumn.existing(
         "_attachment",
         storage=storage,
         upload_folder="attachments",
         max_size=10 * 1024 * 1024,
     )
-    cover = ImageAttribute(
+    cover = ImageColumn.existing(
         "_cover",
         storage=storage,
         upload_folder="covers",
         thumbnail_size=(200, 200),
     )
-    shots = ImageListAttribute("_shots", storage=storage, upload_folder="shots")
+    shots = ImageListColumn.existing("_shots", storage=storage, upload_folder="shots")
 
 
 class PostView(ModelView):
@@ -121,7 +124,11 @@ async def get_db() -> AsyncIterator[AsyncSession]:
             await session.rollback()
             await delete_files(uploaded_files(session))
             raise
-        await delete_files(orphans)
+        else:
+            # Only after a commit, and outside the handler above: inside `try`
+            # a failure here would delete what was just committed, in `finally`
+            # it would delete files the rolled-back rows still reference.
+            await delete_files(orphans)
 
 
 DBSession = Annotated[AsyncSession, Depends(get_db)]

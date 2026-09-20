@@ -108,7 +108,7 @@ def test_image_field_still_takes_thumbnail_size() -> None:
 
 
 def test_the_default_upload_limit_is_still_a_number() -> None:
-    """`FileAttribute` uses it as its own default, so the two stay in step."""
+    """`FileColumn` uses it as its own default, so the two stay in step."""
     assert isinstance(DEFAULT_MAX_UPLOAD_SIZE, int)
     assert FileField("x").max_size == DEFAULT_MAX_UPLOAD_SIZE
 

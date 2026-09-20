@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import io
 from datetime import UTC, datetime
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from starlette_admin_files import File, Image, ObjectStorage
@@ -197,6 +197,36 @@ def test_generate_thumbnail_never_upscales() -> None:
     _, _, size = generate_thumbnail(upload(png_bytes((40, 20))), (100, 100))
 
     assert size == (40, 20)
+
+
+async def test_save_thumbnail_runs_pillow_off_the_event_loop(
+    storage: ObjectStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pillow is CPU-bound, so it must not run on the loop's own thread.
+
+    Asserted as the thread it runs on rather than as elapsed time: a timing
+    assertion either sleeps for real or goes flaky on a loaded CI machine,
+    and neither says what this actually guarantees.
+    """
+    import threading
+
+    from starlette_admin_files import file as file_module
+
+    loop_thread = threading.get_ident()
+    ran_on: list[int] = []
+    real = file_module.generate_thumbnail
+
+    def spy(upload: Any, thumbnail_size: Any) -> Any:
+        ran_on.append(threading.get_ident())
+        return real(upload, thumbnail_size)
+
+    monkeypatch.setattr(file_module, "generate_thumbnail", spy)
+    info = await storage.save(upload(png_bytes((400, 300))), "big.png")
+
+    result = await save_thumbnail(storage, info, upload(png_bytes((400, 300))), (100, 100))
+
+    assert result.thumbnail is not None
+    assert ran_on and loop_thread not in ran_on
 
 
 async def test_save_thumbnail_failure_keeps_the_upload(storage: ObjectStorage) -> None:

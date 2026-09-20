@@ -41,7 +41,7 @@ async def test_keys_never_collide(storage: ObjectStorage) -> None:
 async def test_unicode_name_kept_in_metadata_key_is_ascii(storage: ObjectStorage) -> None:
     info = await storage.save(upload(b"x", RU_NAME, "application/pdf"), f"docs/{RU_NAME}")
 
-    # `save` stores the name as given; sanitising is the attribute's job.
+    # `save` stores the name as given; sanitising is the file column's job.
     assert info.filename == RU_NAME
     assert info.key.isascii()
     assert "dogovor_No7.pdf" in info.key
@@ -53,6 +53,26 @@ async def test_prefix_is_not_doubled(storage: ObjectStorage) -> None:
 
     assert info.key.startswith("media/covers/")
     assert "media/media" not in info.key
+
+
+@pytest.mark.parametrize(
+    ("dest", "expected_folders"),
+    [
+        # A folder named after the prefix folds into it; that is the documented
+        # price of telling a caller's folder from an already prefixed key.
+        ("media/a.txt", ["media"]),
+        ("media/sub/a.txt", ["media", "sub"]),
+        # Only a whole leading segment counts.
+        ("mediafiles/a.txt", ["media", "mediafiles"]),
+        ("docs/a.txt", ["media", "docs"]),
+    ],
+)
+async def test_a_folder_named_after_the_prefix_folds_into_it(
+    storage: ObjectStorage, dest: str, expected_folders: list[str]
+) -> None:
+    info = await storage.save(upload(b"x", "a.txt", "text/plain"), dest)
+
+    assert info.key.split("/")[:-2] == expected_folders
 
 
 @pytest.mark.parametrize(
@@ -111,9 +131,17 @@ async def test_content_disposition_is_ascii_with_filename_star(storage: ObjectSt
         ("video/mp4", "inline"),
         ("text/plain", "attachment"),
         ("application/zip", "attachment"),
-        # Executable in the admin's own origin: never inline.
+        # Executable in the admin's own origin: never inline. The type comes
+        # from the multipart part the client sent, so the parameters and the
+        # case are its to choose and must not change the decision.
         ("image/svg+xml", "attachment"),
         ("text/html", "attachment"),
+        ("text/html; charset=utf-8", "attachment"),
+        ("image/svg+xml; charset=utf-8", "attachment"),
+        ("TEXT/HTML", "attachment"),
+        ("  text/html  ", "attachment"),
+        # Normalisation must not cost the inline types their inlining.
+        ("image/png; qs=0.9", "inline"),
     ],
 )
 async def test_disposition_rules(storage: ObjectStorage, content_type: str, expected: str) -> None:
@@ -123,13 +151,42 @@ async def test_disposition_rules(storage: ObjectStorage, content_type: str, expe
     assert header.startswith(expected)
 
 
-async def test_forced_inline_still_refuses_dangerous_types() -> None:
-    storage = ObjectStorage(name="forced", store=MemoryStore(), disposition="inline")
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        "image/svg+xml",
+        "text/html",
+        # The parameters and the case belong to the client, so the guard
+        # has to compare the bare media type and not the raw header value.
+        "text/html; charset=utf-8",
+        "image/svg+xml; charset=utf-8",
+        "TEXT/HTML",
+        "  text/html  ",
+    ],
+)
+async def test_forced_inline_still_refuses_dangerous_types(content_type: str) -> None:
+    storage = ObjectStorage(
+        name=f"forced-{content_type}", store=MemoryStore(), disposition="inline"
+    )
 
-    info = await storage.save(upload(b"<svg/>", "x.svg", "image/svg+xml"), "x.svg")
+    info = await storage.save(upload(b"<svg/>", "x.svg", content_type), "x.svg")
 
     header = (await storage.store.get_async(path=info.key)).attributes["Content-Disposition"]
     assert header.startswith("attachment")
+
+
+@pytest.mark.parametrize("disposition", ["inlien", "INLINE", "", "download"])
+def test_an_unknown_disposition_is_refused(disposition: str) -> None:
+    """A typo would otherwise reach the stored header verbatim."""
+    with pytest.raises(ValueError, match=r"disposition must be one of"):
+        ObjectStorage(name=f"bad-{disposition}", store=MemoryStore(), disposition=disposition)
+
+
+@pytest.mark.parametrize("disposition", ["auto", "inline", "attachment"])
+def test_the_three_dispositions_are_accepted(disposition: str) -> None:
+    storage = ObjectStorage(name=f"ok-{disposition}", store=MemoryStore(), disposition=disposition)
+
+    assert storage.disposition == disposition
 
 
 async def test_local_store_without_attributes() -> None:
@@ -211,6 +268,55 @@ async def test_serve_downgrades_inline_for_dangerous_types(
     response = await storage.serve(fake_request, info.key)  # type: ignore[arg-type]
 
     assert response.headers["content-disposition"].startswith("attachment")
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "inline",
+        'inline; filename="x.html"',
+        'INLINE; filename="x.html"',
+        'inline ; filename="x.html"',
+    ],
+)
+async def test_serve_downgrades_a_disposition_written_elsewhere(
+    fake_request: FakeRequest, header: str
+) -> None:
+    """The stored header is not necessarily one this package wrote."""
+    storage = ObjectStorage(name=f"elsewhere-{header}", store=MemoryStore())
+    await storage.store.put_async(
+        path="x.html",
+        file=io.BytesIO(b"<script>alert(1)</script>"),
+        attributes={"Content-Type": "text/html", "Content-Disposition": header},
+    )
+
+    response = await storage.serve(fake_request, "x.html")  # type: ignore[arg-type]
+
+    assert response.headers["content-disposition"].startswith("attachment")
+
+
+async def test_serve_keeps_the_parameters_when_it_downgrades(
+    fake_request: FakeRequest,
+) -> None:
+    storage = ObjectStorage(name="downgrade-params", store=MemoryStore(), disposition="inline")
+    info = await storage.save(upload(b"<h1/>", RU_NAME, "text/html; charset=utf-8"), RU_NAME)
+
+    response = await storage.serve(fake_request, info.key)  # type: ignore[arg-type]
+
+    header = response.headers["content-disposition"]
+    assert header.startswith("attachment;")
+    assert 'filename="dogovor_No7.pdf"' in header
+    assert "filename*=UTF-8''" in header
+
+
+async def test_serve_leaves_an_inline_type_inline(
+    storage: ObjectStorage, fake_request: FakeRequest
+) -> None:
+    info = await storage.save(upload(png_bytes(), "cat.png", "image/png"), "cat.png")
+
+    response = await storage.serve(fake_request, info.key)  # type: ignore[arg-type]
+
+    assert response.headers["content-disposition"].startswith("inline")
 
 
 async def test_serve_404(storage: ObjectStorage, fake_request: FakeRequest) -> None:

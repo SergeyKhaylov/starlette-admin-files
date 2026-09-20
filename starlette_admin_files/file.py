@@ -2,7 +2,7 @@
 
 `File` and `Image` describe a file that is already stored. They change nothing,
 neither in the storage nor in the model: everything that changes state lives in
-the model attributes (`FileAttribute` and friends). That is why these objects
+the model's file columns (`FileColumn` and friends). That is why these objects
 have no "unsaved" state and carry no pending content.
 """
 
@@ -14,6 +14,7 @@ import os
 from datetime import datetime
 from typing import Any, BinaryIO, cast
 
+from anyio import to_thread
 from starlette.datastructures import Headers, UploadFile
 from starlette.requests import Request
 from starlette_admin.storage import BaseStorage, FileInfo, get_storage
@@ -57,7 +58,7 @@ class File:
 
     def __setattr__(self, name: str, value: Any) -> None:
         raise AttributeError(
-            f"{type(self).__name__} is read-only; change the file through the model attribute"
+            f"{type(self).__name__} is read-only; change the file through the model's file column"
         )
 
     def __delattr__(self, name: str) -> None:
@@ -131,7 +132,7 @@ class File:
         """Remove the file from the storage.
 
         The reference held by the model is left alone: clear it through the
-        model attribute (`await post.cover.delete()`), or delete deliberately
+        file column (`await post.cover.delete()`), or delete deliberately
         after the transaction commits.
         """
         await self.storage.delete(self.key)
@@ -300,11 +301,20 @@ async def save_thumbnail(
 
     A failure to generate one never fails the upload, mirroring
     `ImageField._post_store` upstream.
+
+    Unlike upstream, the Pillow work runs in a worker thread. Building a
+    thumbnail from a 12MP photo costs around 60ms of CPU, which is 60ms the
+    event loop spends serving nobody — and an admin is usually mounted into
+    an application that is answering other requests at the same time. Pillow
+    releases the GIL for the decode, the resize and the encode, so the thread
+    is real parallelism rather than a way of yielding.
     """
     from dataclasses import replace
 
     try:
-        content, extension, (width, height) = generate_thumbnail(upload, thumbnail_size)
+        content, extension, (width, height) = await to_thread.run_sync(
+            generate_thumbnail, upload, thumbnail_size
+        )
         stem = info.key.rsplit(".", 1)[0] if "." in info.key else info.key
         dest = f"{stem}.thumb.{extension}"
         thumbnail_info = await storage.save(

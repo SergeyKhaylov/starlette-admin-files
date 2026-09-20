@@ -1,4 +1,4 @@
-"""Model attributes: reading, saving, replacing, deleting, validating."""
+"""File columns on a model: reading, saving, replacing, deleting, validating."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def test_field_params_carry_everything_the_field_needs(model: type[Any]) -> None
     assert isinstance(ImageField(**params), ImageField)
 
 
-def test_field_params_of_a_list_attribute(model: type[Any]) -> None:
+def test_field_params_of_a_list_column(model: type[Any]) -> None:
     assert model.shots.field_params["multiple"] is True
 
 
@@ -42,16 +42,16 @@ def test_max_size_defaults_to_the_upstream_value(model: type[Any]) -> None:
     assert model.cover.field_params["max_size"] == FileField("x").max_size
 
 
-def test_class_access_returns_the_attribute(model: type[Any]) -> None:
-    from starlette_admin_files import ImageAttribute
+def test_class_access_carries_the_file_column(model: type[Any]) -> None:
+    from starlette_admin_files import ImageColumn
 
-    assert isinstance(model.cover, ImageAttribute)
+    assert isinstance(model.cover.file_column, ImageColumn)
 
 
 # --- single file --------------------------------------------------------
 
 
-async def test_empty_attribute(post: Any) -> None:
+async def test_empty_column(post: Any) -> None:
     assert post.attachment.file is None
     assert bool(post.attachment) is False
 
@@ -89,7 +89,7 @@ async def test_save_accepts_raw_sources(
     assert await saved.read() == source
 
 
-async def test_image_attribute_computes_dimensions_and_thumbnail(post: Any) -> None:
+async def test_image_column_computes_dimensions_and_thumbnail(post: Any) -> None:
     image = await post.cover.save(upload(png_bytes((400, 300))))
 
     assert isinstance(image, Image)
@@ -131,7 +131,7 @@ async def test_delete_can_keep_the_file(post: Any, storage: ObjectStorage) -> No
 
 
 async def test_direct_assignment_is_refused(post: Any) -> None:
-    with pytest.raises(AttributeError, match="only changes through the attribute"):
+    with pytest.raises(AttributeError, match="only changes through the file column"):
         post.attachment = None
 
 
@@ -275,29 +275,25 @@ async def test_an_emptied_list_column_is_sql_null(session: AsyncSession, model: 
     assert stored == "null"  # SQLite for SQL NULL; a JSON null would be 'text'
 
 
-def test_image_attributes_expose_their_parameters(storage: ObjectStorage) -> None:
+def test_image_columns_expose_their_parameters(storage: ObjectStorage) -> None:
     """A `*args, **kwargs` wrapper in the MRO would hide them from editors."""
     import inspect
 
-    from starlette_admin_files import ImageAttribute, ImageListAttribute
+    from starlette_admin_files import ImageColumn, ImageListColumn
+    from starlette_admin_files.columns import _COLUMN_PARAMS
 
-    for attribute_class in (ImageAttribute, ImageListAttribute):
-        parameters = set(inspect.signature(attribute_class).parameters)
-        assert parameters == {
-            "column",
-            "storage",
-            "upload_folder",
-            "max_size",
-            "accept",
-            "thumbnail_size",
-        }, attribute_class.__name__
+    for column_class in (ImageColumn, ImageListColumn):
+        parameters = set(inspect.signature(column_class).parameters)
+        assert {"storage", "upload_folder", "max_size", "accept", "thumbnail_size"} <= parameters
+        assert set(_COLUMN_PARAMS) <= parameters
+        assert "kwargs" not in parameters, column_class.__name__
 
 
-def test_plain_file_attributes_take_no_thumbnail_size(storage: ObjectStorage) -> None:
+def test_plain_file_columns_take_no_thumbnail_size(storage: ObjectStorage) -> None:
     """It would break `FileField(**field_params)`, which has no such argument."""
-    from starlette_admin_files import FileAttribute
+    from starlette_admin_files import FileColumn
 
     with pytest.raises(TypeError, match="thumbnail_size"):
-        FileAttribute("_f", storage=storage, thumbnail_size=(10, 10))  # type: ignore[call-arg]
+        FileColumn(storage=storage, thumbnail_size=(10, 10))  # type: ignore[call-arg]
 
-    assert FileAttribute("_f", storage=storage).thumbnail_size is None
+    assert FileColumn(storage=storage).thumbnail_size is None

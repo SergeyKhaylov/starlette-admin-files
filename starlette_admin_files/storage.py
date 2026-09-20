@@ -66,6 +66,10 @@ _INLINE_TYPES = frozenset(
 )
 _INLINE_PREFIXES = ("video/", "audio/")
 
+#: What `ObjectStorage(disposition=...)` accepts. A typo would otherwise reach
+#: the stored header verbatim and only show up in a browser.
+_DISPOSITIONS = frozenset({"auto", "inline", "attachment"})
+
 #: Never inline, even when the object's own metadata says so.
 _NEVER_INLINE = frozenset(
     {
@@ -145,17 +149,23 @@ def allow_unicode_filenames(enabled: bool = True) -> None:
 
     `starlette_admin.storage.secure_filename` collapses everything outside
     ``[A-Za-z0-9_.-]`` into ``_``, so "договор.pdf" becomes "pdf". The switch
-    patches a private global of starlette-admin, which is why it is a function
-    an application calls rather than an import side effect.
+    patches a private global of starlette-admin.
+
+    Importing this package turns it on — that is the behaviour it exists to
+    provide, and the admin field does its own sanitising through the same
+    global, so nothing else could reach it in time. The patch is process-wide:
+    it applies to every `FileField` in the application, including ones backed
+    by another storage. Call ``allow_unicode_filenames(False)`` to restore the
+    upstream behaviour everywhere.
     """
     sa_storage._FILENAME_SANITIZE_RE = _UNICODE_FILENAME_RE if enabled else _ASCII_FILENAME_RE
 
 
-# The name stays Unicode all the way from the form to the stored metadata: it
-# is what the admin UI shows and what `Content-Disposition: filename*` carries.
-# Only what must be ASCII becomes ASCII — the object key and the `filename`
-# parameter. Call `allow_unicode_filenames(False)` to restore the upstream
-# behaviour.
+# On by default: the name stays Unicode all the way from the form to the stored
+# metadata — it is what the admin UI shows and what `Content-Disposition:
+# filename*` carries. Only what must be ASCII becomes ASCII: the object key and
+# the `filename` parameter. See `allow_unicode_filenames` for the scope of the
+# patch and how to turn it off.
 allow_unicode_filenames()
 
 
@@ -175,11 +185,32 @@ def _content_disposition(filename: str, disposition: str) -> str:
     return header
 
 
+def _media_type(content_type: str) -> str:
+    """The bare media type: parameters dropped, lower-cased.
+
+    Every comparison against `_NEVER_INLINE` and friends goes through this.
+    A `Content-Type` arrives from the multipart part the client sent, so
+    "text/html" and "text/html; charset=utf-8" must not be told apart.
+    """
+    return content_type.split(";", 1)[0].strip().lower()
+
+
 def _is_inline(content_type: str) -> bool:
-    media_type = content_type.split(";", 1)[0].strip().lower()
+    media_type = _media_type(content_type)
     if media_type in _NEVER_INLINE:
         return False
     return media_type in _INLINE_TYPES or media_type.startswith(_INLINE_PREFIXES)
+
+
+def _as_attachment(header: str) -> str:
+    """Swap the disposition type for `attachment`, keeping the parameters.
+
+    The stored header is not necessarily one this package wrote: it may say
+    `inline` with no parameters at all, or in a different case. Rebuilding it
+    is what makes the downgrade in `serve()` hold for any of those.
+    """
+    _, semicolon, parameters = header.partition(";")
+    return f"attachment{semicolon}{parameters}"
 
 
 def _upload_size(upload: UploadFile) -> int:
@@ -199,7 +230,13 @@ class ObjectStorage(BaseStorage):
     Parameters:
         name: Registry name; it is recorded in every file's metadata.
         store: A configured obstore store (S3/GCS/Azure/Local/Memory/HTTP).
-        prefix: Key prefix inside the bucket, acting like a folder.
+        prefix: Key prefix inside the bucket, acting like a folder. The name
+            is reserved: an `upload_folder` equal to it, or starting with it,
+            is folded into it rather than nested under it — see
+            `_strip_prefix`. With ``prefix="media"``, an ``upload_folder`` of
+            ``"media"`` gives ``media/<uuid>/name`` and not
+            ``media/media/<uuid>/name``. Pick a prefix your folders do not
+            use, or leave the prefix out and put it in every folder instead.
         base_url: Public base URL (a CDN or a public bucket). When set, `url()`
             returns a direct link and only signs when asked to. Without it,
             S3/GCS/Azure always sign and other stores are served through the
@@ -207,7 +244,11 @@ class ObjectStorage(BaseStorage):
         expires: Lifetime of pre-signed URLs, in seconds.
         disposition: ``"auto"`` picks ``inline`` for images, video, audio and
             PDF and ``attachment`` for everything else; pass ``"inline"`` or
-            ``"attachment"`` to force one.
+            ``"attachment"`` to force one. Anything else is a `ValueError`.
+
+    Raises:
+        ValueError: `disposition` is not one of ``"auto"``, ``"inline"`` or
+            ``"attachment"``.
     """
 
     def __init__(
@@ -220,6 +261,10 @@ class ObjectStorage(BaseStorage):
         expires: int = 3600,
         disposition: str = "auto",
     ) -> None:
+        if disposition not in _DISPOSITIONS:
+            raise ValueError(
+                f"disposition must be one of {sorted(_DISPOSITIONS)}, got {disposition!r}"
+            )
         self.store = store
         self.prefix = _ascii_path(prefix)
         self.base_url = base_url.rstrip("/") if base_url else None
@@ -234,6 +279,18 @@ class ObjectStorage(BaseStorage):
         `ImageField._save_thumbnail` derives the thumbnail path from
         `FileInfo.key` — an already prefixed key — and hands it back to
         `save()`. Without this the prefix would double: ``media/media/...``.
+
+        The two cases are indistinguishable from `dest` alone, so the rule is
+        positional and a folder that happens to match the prefix collapses
+        with it. With ``prefix="media"``:
+
+            "media/a.txt"      ->  media/<uuid>/a.txt        (not media/media/…)
+            "media/sub/a.txt"  ->  media/sub/<uuid>/a.txt    (not media/media/sub/…)
+            "mediafiles/a.txt" ->  media/mediafiles/<uuid>/a.txt
+            "docs/a.txt"       ->  media/docs/<uuid>/a.txt
+
+        Only a whole leading segment counts ("mediafiles" is left alone), and
+        nothing is lost: the files land one level up, in the prefix itself.
         """
         folder = folder.strip("/")
         if self.prefix and (folder == self.prefix or folder.startswith(f"{self.prefix}/")):
@@ -286,7 +343,7 @@ class ObjectStorage(BaseStorage):
         if not self.supports_attributes:
             return None
         disposition = self.disposition
-        if disposition == "inline" and content_type in _NEVER_INLINE:
+        if disposition == "inline" and _media_type(content_type) in _NEVER_INLINE:
             disposition = "attachment"
         elif disposition == "auto":
             disposition = "inline" if _is_inline(content_type) else "attachment"
@@ -347,7 +404,7 @@ class ObjectStorage(BaseStorage):
         }
         disposition = attributes.get("Content-Disposition")
         if disposition and not _is_inline(media_type):
-            disposition = disposition.replace("inline;", "attachment;", 1)
+            disposition = _as_attachment(disposition)
         if disposition:
             headers["content-disposition"] = disposition
         return StreamingResponse(result.stream(), media_type=media_type, headers=headers)

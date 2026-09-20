@@ -48,7 +48,7 @@ async def test_create_through_the_admin(
     assert len(post._shots) == 1
 
 
-async def test_attributes_read_what_the_admin_wrote(
+async def test_file_columns_read_what_the_admin_wrote(
     admin: Admin, view: ModelView, request_factory: Any, session: AsyncSession, model: type[Any]
 ) -> None:
     request = request_factory(RequestAction.CREATE)

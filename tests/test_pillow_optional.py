@@ -9,9 +9,8 @@ from typing import Any
 
 import pytest
 from obstore.store import MemoryStore
-from sqlalchemy import JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from starlette_admin_files import FileAttribute, ImageAttribute, ObjectStorage
+from starlette_admin_files import FileColumn, ImageColumn, ObjectStorage
 
 from conftest import upload
 
@@ -44,11 +43,11 @@ def test_pillow_is_really_blocked(without_pillow: None) -> None:
         importlib.import_module("PIL")
 
 
-def test_image_attribute_fails_at_declaration_time(without_pillow: None) -> None:
+def test_image_column_fails_at_declaration_time(without_pillow: None) -> None:
     storage = ObjectStorage(name="nopillow-image", store=MemoryStore())
 
     with pytest.raises(ImportError, match=r"requires Pillow"):
-        ImageAttribute("_img", storage=storage)
+        ImageColumn(storage=storage)
 
 
 async def test_plain_files_work_without_pillow(without_pillow: None) -> None:
@@ -61,8 +60,7 @@ async def test_plain_files_work_without_pillow(without_pillow: None) -> None:
         __tablename__ = "doc_without_pillow"
 
         id: Mapped[int] = mapped_column(primary_key=True)
-        _file: Mapped[dict | None] = mapped_column("file", JSON)
-        file = FileAttribute("_file", storage=storage, upload_folder="docs")
+        file = FileColumn(storage=storage, upload_folder="docs")
 
     doc = Doc()
     saved = await doc.file.save(upload(b"hello", "отчёт.txt", "text/plain"))
